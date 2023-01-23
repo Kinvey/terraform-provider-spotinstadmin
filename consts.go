@@ -16,17 +16,30 @@ const (
 	providerName                 = "spotinstadmin"
 	accountResourceName          = providerName + "_account"
 	programmaticUserResourceName = providerName + "_programmatic_user"
+	linkAccountResourceName      = providerName + "_account_aws_link"
+	externalIDResourceName       = providerName + "_account_external_id"
 )
 
 const (
-	accountResourceNameAttrKey       = "name"
-	accountResourceRoleArnAttrKey    = "aws_role_arn"
-	accountResourceExternalIDAttrKey = "aws_external_id"
+	accountResourceNameAttrKey           = "name"
+	accountResourceorganizationIdAttrKey = "organization_id"
 )
 
 const (
-	userResourceAccountIDAttrKey   = "account_id"
 	userResourceNameAttrKey        = "name"
+	userResourceAccountIDAttrKey   = "account_id"
 	userResourceDescriptionAttrKey = "description"
 	userResourceAccessTokenAttrKey = "access_token"
+)
+
+const (
+	linkAccountResourceAccountIDAttrKey          = "account_id"
+	linkAccountResourceRoleArnAttrKey            = "aws_role_arn"
+	linkAccountResourceProviderExternalIdAttrKey = "provider_external_id"
+	linkAccountResourceOrganizationIdAttrKey     = "organization_id"
+)
+
+const (
+	awsExternalIDResourceAccountIDAttrKey         = "account_id"
+	awsExternalIDResourceAttrKeyExternalIDAttrKey = "external_id"
 )

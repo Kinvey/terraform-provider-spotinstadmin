@@ -1,8 +1,38 @@
 package users
 
-import "encoding/json"
+import "github.com/kinvey/terraform-provider-spotinstadmin/client"
 
-type response struct {
-	Kind  string            `json:"kind"`
-	Items []json.RawMessage `json:"items"`
+// Service ...
+type Service struct {
+	httpClient *client.Client
+}
+
+type User struct {
+	ID       string `json:"userId"`
+	UserName string `json:"username"`
+	Type     string `json:"type"`
+}
+
+type UserDetails struct {
+	ID          string `json:"userId"`
+	AccessToken string `json:"accessToken"`
+	UserName    string `json:"username"`
+	Description string `json:"description"`
+}
+
+type createProgrammaticUserAccount struct {
+	ID   string `json:"id"`
+	Role string `json:"role"`
+}
+
+type createProgrammaticUserRequest struct {
+	Accounts    []createProgrammaticUserAccount `json:"accounts"`
+	Description string                          `json:"description"`
+	Name        string                          `json:"name"`
+}
+
+type createProgrammaticUserResponse struct {
+	Token string `json:"token"`
+	Name  string `json:"name"`
+	ID    string `json:"id"`
 }

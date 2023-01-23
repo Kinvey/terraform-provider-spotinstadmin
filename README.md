@@ -1,16 +1,29 @@
 
+## Examples
 
 ```terraform
 
-resource "spotinstadmin_account" "this" {
-  name            = "${var.account_name}"
-  aws_role_arn    = "${aws_iam_role.spotinst.arn}"
-  aws_external_id = "${local.external_id}"
+resource "spotinstadmin_account" "custdep" {
+  name            = "${var.custdep}"
 }
 
-resource "spotinstadmin_programmatic_user" "this" {
-  name        = "${var.account_name}"
-  account_id  = "${spotinstadmin_account.this.id}"
-  description = "Programmatic user for ${var.account_name} account"
+resource "spotinstadmin_account_external_id" "custdep" {
+  account_id            = "${spotinstadmin_account.custdep.id}"
 }
+
+resource "spotinstadmin_account_aws_link" "custdep" {
+  account_id      = "${spotinstadmin_account.custdep.id}"
+  aws_role_arn    = "${aws_iam_role.spotinst.arn}"
+}
+
+resource "spotinstadmin_programmatic_user" "custdep" {
+  name        = "${var.custdep}"
+  account_id  = "${spotinstadmin_account.custdep.id}"
+  description = "Account for ${var.custdep}"
+}
+```
+
+## Building the Provider
+```bash
+go get && go build .
 ```
