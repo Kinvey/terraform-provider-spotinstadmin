@@ -9,19 +9,14 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/cnicolov/terraform-provider-spotinstadmin/client"
-	"github.com/cnicolov/terraform-provider-spotinstadmin/client/common"
+	"github.com/kinvey/terraform-provider-spotinstadmin/client"
+	"github.com/kinvey/terraform-provider-spotinstadmin/client/common"
 )
 
 const (
 	createAccoountRequestPath = "/setup/account"
 	accountServiceBaseURL     = "https://api.spotinst.io"
 )
-
-// Service is a client for creating accounts
-type Service struct {
-	httpClient *client.Client
-}
 
 // New creates new accounts service client
 func New(token string) *Service {
@@ -31,32 +26,17 @@ func New(token string) *Service {
 	}
 }
 
-// Account represesnts Spotinst account in API
-type Account struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	OrganizationID     string `json:"organizationId"`
-	ProviderExternalID string `json:"providerExternalId,omitempty"`
-}
-
-// AccountNotFoundError is raised when looking up account
-// fails because there's no such account in Spotinst:w
-type AccountNotFoundError struct {
-	AccountID string
-}
-
 func (a *AccountNotFoundError) Error() string {
 	return fmt.Sprintf("Account %s not found", a.AccountID)
 }
 
 // Create creates accoount in Spotinst
-func (as *Service) Create(name, iamRole, externalID string) (*Account, error) {
-
+func (as *Service) Create(name string) (*Account, error) {
 	body := map[string]map[string]string{
 		"account": {"name": name},
 	}
 
-	log.Printf("Making request %v\n", body)
+	log.Printf("[TRACE] Making request %v\n", body)
 	req, err := as.httpClient.NewRequest(http.MethodPost, "/setup/account", &body)
 
 	if err != nil {
@@ -68,13 +48,13 @@ func (as *Service) Create(name, iamRole, externalID string) (*Account, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if len(v.Response.Items) == 0 {
-		return nil, errors.New("Couldn't create account")
+		return nil, errors.New("couldn't create account")
 	}
+
 	var account Account
-
 	fmt.Println(string(v.Response.Items[0]))
-
 	err = json.Unmarshal(v.Response.Items[0], &account)
 
 	if err != nil {
@@ -83,20 +63,63 @@ func (as *Service) Create(name, iamRole, externalID string) (*Account, error) {
 
 	time.Sleep(time.Second * 5)
 
-	err = as.setupCloudCredentials(account.ID, iamRole, externalID)
-
 	if err != nil {
 		_ = as.Delete(account.ID)
+
+		return nil, err
+	}
+
+	if err != nil {
 		return nil, err
 	}
 
 	return &account, nil
 }
 
-func (as *Service) setupCloudCredentials(accountID, iamRole, externalID string) error {
+// CreateExternalId...
+func (as *Service) CreateExternalId(accountID string) (*ExternalID, error) {
+	log.Printf("[TRACE] Generating ExternalID\n")
+	req, err := as.httpClient.NewRequest(http.MethodPost, "/setup/credentials/aws/externalId", nil)
 
+	if err != nil {
+		return nil, err
+	}
+
+	q, _ := url.ParseQuery(req.URL.RawQuery)
+
+	q.Add("accountId", accountID)
+
+	req.URL.RawQuery = q.Encode()
+
+	var v common.Response
+	_, err = as.httpClient.Do(req, &v)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(v.Response.Items) == 0 {
+		return nil, errors.New("couldn't generate externalID")
+	}
+
+	var externalID ExternalID
+
+	fmt.Println(string(v.Response.Items[0]))
+
+	err = json.Unmarshal(v.Response.Items[0], &externalID)
+
+	if err != nil {
+		return nil, err
+	}
+
+	time.Sleep(time.Second * 5)
+
+	return &externalID, nil
+}
+
+// LinkAWSAccount...
+func (as *Service) LinkAWSAccount(accountID, iamRole string) error {
 	body := map[string]map[string]string{
-		"credentials": {"iamRole": iamRole, "externalId": externalID},
+		"credentials": {"iamRole": iamRole},
 	}
 
 	req, err := as.httpClient.NewRequest(http.MethodPost, "/setup/credentials/aws", &body)
@@ -110,7 +133,7 @@ func (as *Service) setupCloudCredentials(accountID, iamRole, externalID string) 
 		return err
 	}
 
-	log.Printf("%#v", req)
+	log.Printf("[TRACE] %#v", req)
 
 	var r common.Response
 
@@ -120,14 +143,14 @@ func (as *Service) setupCloudCredentials(accountID, iamRole, externalID string) 
 		return fmt.Errorf("failed setting up cloud credentials, %#v", r.Response.Errors)
 	}
 
-	log.Printf("%#v", r)
+	log.Printf("[TRACE] %#v", r)
 
 	return err
 }
 
 // Get returns account by id
 func (as *Service) Get(id string) (*Account, error) {
-	log.Printf("Getting account %v\n", id)
+	log.Printf("[TRACE] Getting account %v\n", id)
 
 	req, err := as.httpClient.NewRequest(http.MethodGet, "/setup/account", nil)
 
@@ -154,8 +177,13 @@ func (as *Service) Get(id string) (*Account, error) {
 // Delete delets account by id
 func (as *Service) Delete(id string) error {
 	req, err := as.httpClient.NewRequest(http.MethodDelete, fmt.Sprintf("/setup/account/%s", id), nil)
+	if err != nil {
+		return nil
+	}
+
 	v := make(map[string]interface{})
 	_, err = as.httpClient.Do(req, &v)
+
 	return err
 }
 
@@ -167,6 +195,7 @@ func IsAccountNotFoundErr(err error) bool {
 		found = true
 	default:
 	}
+
 	return found
 }
 
@@ -181,7 +210,6 @@ func accountsFromJSON(r common.Response) ([]*Account, error) {
 	}
 
 	for i, data := range r.Response.Items {
-
 		var acc accountJSON
 		err := json.Unmarshal(data, &acc)
 		if err != nil {
@@ -196,15 +224,17 @@ func accountsFromJSON(r common.Response) ([]*Account, error) {
 		}
 
 	}
+
 	return accountList, nil
 }
 
 func filterAccountByID(id string, accountList []*Account) (*Account, error) {
 	for _, a := range accountList {
-		log.Printf("Checking %v with %v\n", a.ID, id)
+		log.Printf("[TRACE] Checking %v with %v\n", a.ID, id)
 		if a.ID == id {
 			return a, nil
 		}
 	}
+
 	return nil, &AccountNotFoundError{AccountID: id}
 }

@@ -6,21 +6,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 
-	"github.com/cnicolov/terraform-provider-spotinstadmin/client"
+	"github.com/kinvey/terraform-provider-spotinstadmin/client"
+	"github.com/kinvey/terraform-provider-spotinstadmin/client/common"
 )
 
 const (
-	usersServiceBaseURL = "https://console.spotinst.com"
+	usersServiceBaseURL = "https://api.spotinst.io"
 	emptyString         = ``
 )
-
-// Service ...
-type Service struct {
-	httpClient *client.Client
-}
 
 // New ..
 func New(token string) *Service {
@@ -29,115 +24,100 @@ func New(token string) *Service {
 	}
 }
 
-// User ...
-// {
-// 	"createdAt": "2020-02-26T12:23:57.000Z",
-// 	"updatedAt": "2020-02-26T12:23:57.000Z",
-// 	"deletedAt": null,
-// 	"id": 181108,
-// 	"roleBitMask": 2,
-// 	"permissionStrategy": "ROLE_BASED",
-// 	"alias": "Progress Software",
-// 	"coreUser": {
-// 		"id": 25826,
-// 		"email": "b827f1e9-42ca-4bc2-a386-1d437e855253@ProgressSoftware.com",
-// 		"firstName": "Bla",
-// 		"lastName": null,
-// 		"type": "programmatic"
-// 	},
-// 	"userId": 25826,
-// 	"accountId": "act-6db0dbf7",
-// 	"organizationId": 606079874257
-// },
-type User struct {
-	ID          int    `json:"userId"`
-	AccessToken string `json:"accessToken"`
-	Name        string
-	Description string `json:"description"`
-	CoreUser    struct {
-		ID        int
-		FirstName string `json:"firstName"`
-		Type      string
-	} `json:"coreUser"`
-	AccountID string `json:"accountId"`
-}
-
-type createProgrammaticUserRequest struct {
-	AccountRole        int      `json:"accountRole"`
-	Accounts           []string `json:"accounts"`
-	Description        string   `json:"description"`
-	Name               string   `json:"name"`
-	PermissionStrategy string   `json:"permissionStrategy"`
-	PolicyIds          []int    `json:"policyIds"`
-}
-
-type createProgrammaticUserResponse struct {
-	Token string
-	Type  string
-	Name  string
-}
-
 // Create ..
-func (us *Service) Create(username, description, accountID string) (*User, error) {
-
+func (us *Service) Create(username, description, accountID string) (*UserDetails, error) {
 	b := &createProgrammaticUserRequest{
-		AccountRole:        2,
-		Accounts:           []string{accountID},
-		Description:        description,
-		Name:               username,
-		PermissionStrategy: "ROLE_BASED",
-		PolicyIds:          []int{},
+		Accounts:    []createProgrammaticUserAccount{{ID: accountID, Role: "editor"}},
+		Description: description,
+		Name:        username,
 	}
 
-	req, err := us.httpClient.NewRequest(http.MethodPost, "/setup/shared/ums/programmaticUser", b)
+	req, err := us.httpClient.NewRequest(http.MethodPost, "/setup/user/programmatic", b)
 	if err != nil {
 		return nil, err
 	}
 
-	var responseBody response
+	var v common.Response
 
-	_, err = us.httpClient.Do(req, &responseBody)
+	_, err = us.httpClient.Do(req, &v)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(responseBody.Items) == 0 {
-		return nil, errors.New("Cannot provision user")
+	if len(v.Response.Errors) > 0 {
+		return nil, errors.New(v.Response.Errors[0].Message)
+	}
+
+	if len(v.Response.Items) == 0 {
+		r, e := json.Marshal(b)
+		rr, er := json.Marshal(v)
+		if e != nil || er != nil {
+			return nil, errors.New("cannot provision user")
+		}
+
+		return nil, fmt.Errorf("cannot provision user: %#v %#v", string(r), string(rr))
 	}
 
 	var result createProgrammaticUserResponse
 
-	err = json.Unmarshal(responseBody.Items[0], &result)
+	err = json.Unmarshal(v.Response.Items[0], &result)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("IN CREATE: %v\n", accountID)
-	user, err := us.Get(username, accountID)
+	user, err := us.Get(username)
 	if err != nil {
 		return nil, err
 	}
 
 	user.AccessToken = result.Token
+
 	return user, nil
 }
 
 // Get ...
-func (us *Service) Get(username, accountID string) (*User, error) {
+func (us *Service) Get(username string) (*UserDetails, error) {
 
-	req, err := us.httpClient.NewRequest(http.MethodGet, "/setup/shared/accountUserMapping", nil)
+	req, err := us.httpClient.NewRequest(http.MethodGet, "/setup/organization/user", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("IN GET: %v\n", accountID)
+	var r common.Response
 
-	u, _ := url.ParseQuery(req.URL.RawQuery)
-	u.Add("spotinstAccountId", accountID)
-	u.Add("shouldIncludeUser", "true")
-	req.URL.RawQuery = u.Encode()
+	_, err = us.httpClient.Do(req, &r)
 
-	var r response
+	if err != nil {
+		return nil, err
+	}
+	userList, err := usersFromJSON(r)
+	if err != nil {
+		return nil, err
+	}
+	if len(userList) == 0 {
+		return nil, errors.New("Cannot get users")
+	}
+
+	user := filterUserByName(username, userList)
+
+	if user == nil {
+		return nil, nil
+	}
+	userDetails, err := us.GetDetails(user.ID)
+
+	return userDetails, nil
+}
+
+// GetDetails...
+func (us *Service) GetDetails(userId string) (*UserDetails, error) {
+	reqString := fmt.Sprintf("/setup/user/%s", userId)
+	req, err := us.httpClient.NewRequest(http.MethodGet, reqString, nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var r common.Response
 
 	_, err = us.httpClient.Do(req, &r)
 
@@ -145,23 +125,59 @@ func (us *Service) Get(username, accountID string) (*User, error) {
 		return nil, err
 	}
 
-	userList, err := usersFromJSON(r)
+	if len(r.Response.Items) == 0 {
+		return nil, errors.New("cannot get user")
+	}
 
+	var user *UserDetails
+	err = json.Unmarshal(r.Response.Items[0], &user)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(userList) == 0 {
-		return nil, errors.New("Cannot get users")
-	}
-
-	return filterUserByName(username, userList)
+	return user, nil
 }
 
-func usersFromJSON(r response) ([]*User, error) {
-	userList := make([]*User, len(r.Items))
+// Update ...
+func (us *Service) Update(u *User) (*User, error) {
+	return u, nil
+}
 
-	for i, jsonData := range r.Items {
+// Delete ...
+func (us *Service) Delete(username string) error {
+	user, err := us.Get(username)
+	if err != nil {
+		return err
+	}
+
+	log.Println(user.ID)
+	req, err := us.httpClient.NewRequest(http.MethodDelete, fmt.Sprintf("/setup/user/%v", user.ID), nil)
+	if err != nil {
+		log.Println(err)
+
+		return err
+	}
+
+	resp, err := us.httpClient.Do(req, nil)
+	if err != nil {
+		log.Println(err)
+
+		return err
+	}
+
+	log.Printf("[TRACE] RESPONSE: %#v", resp)
+
+	if resp.StatusCode > 399 {
+		return errors.New("Cannot delete user: " + user.UserName)
+	}
+
+	return nil
+}
+
+func usersFromJSON(r common.Response) ([]*User, error) {
+	userList := make([]*User, len(r.Response.Items))
+
+	for i, jsonData := range r.Response.Items {
 		var obj User
 		err := json.Unmarshal(jsonData, &obj)
 		if err != nil {
@@ -174,50 +190,15 @@ func usersFromJSON(r response) ([]*User, error) {
 
 }
 
-func filterUserByName(username string, ul []*User) (*User, error) {
+func filterUserByName(username string, ul []*User) *User {
 	for _, u := range ul {
 
-		log.Printf("%v\n", u)
-		log.Printf("Checking %v with %v\n", u.CoreUser.FirstName, username)
-		if strings.ToLower(u.CoreUser.FirstName) == username {
-			return u, nil
+		log.Printf("[TRACE] %v\n", u)
+		log.Printf("[TRACE] Checking %v with %v\n", u.UserName, username)
+		if strings.ToLower(u.UserName) == username {
+			return u
 		}
 	}
-	return nil, fmt.Errorf("User %s not found", username)
-}
 
-// Update ...
-func (us *Service) Update(u *User) (*User, error) {
-	return u, nil
-}
-
-// Delete ...
-func (us *Service) Delete(username, accountID string) error {
-	user, err := us.Get(username, accountID)
-	if err != nil {
-		return err
-	}
-
-	log.Println(user.CoreUser.ID)
-	req, err := us.httpClient.NewRequest(http.MethodDelete, fmt.Sprintf("/setup/shared/ums/user/%v", user.CoreUser.ID), nil)
-
-	u, _ := url.ParseQuery(req.URL.RawQuery)
-
-	u.Add("accountId", accountID)
-
-	req.URL.RawQuery = u.Encode()
-
-	resp, err := us.httpClient.Do(req, nil)
-
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-
-	log.Printf("RESPONSE !!!!!!!!!!!! %#v", resp)
-
-	if resp.StatusCode > 399 {
-		return errors.New("Cannot delete user: " + user.CoreUser.FirstName)
-	}
 	return nil
 }

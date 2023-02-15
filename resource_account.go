@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/cnicolov/terraform-provider-spotinstadmin/services/accounts"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/kinvey/terraform-provider-spotinstadmin/services/accounts"
 )
 
 func resourceAccount() *schema.Resource {
@@ -13,21 +13,14 @@ func resourceAccount() *schema.Resource {
 		Delete: resourceAccountDelete,
 
 		Schema: map[string]*schema.Schema{
-			accountResourceNameAttrKey: &schema.Schema{
+			accountResourceNameAttrKey: {
 				Type:     schema.TypeString,
 				Required: true,
-				ForceNew: true,
+				ForceNew: false,
 			},
-
-			accountResourceRoleArnAttrKey: {
-				Type:        schema.TypeString,
-				Description: "AWS Role arn to assume",
-				Required:    true,
-			},
-			accountResourceExternalIDAttrKey: {
-				Type:        schema.TypeString,
-				Description: "ExternalID to use",
-				Required:    true,
+			accountResourceorganizationIdAttrKey: {
+				Type:     schema.TypeString,
+				Computed: true,
 			},
 		},
 	}
@@ -36,10 +29,8 @@ func resourceAccount() *schema.Resource {
 func resourceAccountCreate(d *schema.ResourceData, m interface{}) error {
 	accountsService := m.(*Meta).accountsService
 	name := d.Get(accountResourceNameAttrKey).(string)
-	iamRole := d.Get(accountResourceRoleArnAttrKey).(string)
-	externalID := d.Get(accountResourceExternalIDAttrKey).(string)
 
-	out, err := accountsService.Create(name, iamRole, externalID)
+	out, err := accountsService.Create(name)
 
 	if err != nil {
 		return err
